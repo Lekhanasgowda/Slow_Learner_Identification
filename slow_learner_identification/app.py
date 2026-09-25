@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+
 
 # ============================================================
 # PAGE CONFIG
@@ -14,6 +16,7 @@ st.set_page_config(
     page_icon="🎓",
     layout="wide"
 )
+
 
 # ============================================================
 # TITLE
@@ -29,67 +32,266 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
 # ============================================================
-# GENERATE 100 STUDENTS
+# LOAD REAL STUDENT DATASET
 # ============================================================
 
-np.random.seed(42)
+DATA_FILE = "data/student_data.csv"
 
-students = []
+try:
+    raw_df = pd.read_csv(DATA_FILE)
 
-for i in range(1, 101):
+except FileNotFoundError:
+    st.error(
+        "❌ student_data.csv was not found. "
+        "Please place the CSV file inside the 'data' folder."
+    )
+    st.stop()
 
-    mathematics = np.random.randint(30, 96)
-    science = np.random.randint(30, 96)
-    english = np.random.randint(30, 96)
-    attendance = np.random.randint(50, 101)
-    assignments = np.random.randint(35, 101)
-    previous_exam = np.random.randint(30, 96)
 
-    average = (
-        mathematics +
-        science +
-        english +
-        assignments +
-        previous_exam
-    ) / 5
+# ============================================================
+# CHECK REQUIRED COLUMNS
+# ============================================================
 
-    # Risk calculation
-    if average < 50 or attendance < 60:
-        risk = "High Risk"
+required_columns = [
+    "Student_ID",
+    "First_Name",
+    "Last_Name",
+    "Attendance (%)",
+    "Midterm_Score",
+    "Final_Score",
+    "Assignments_Avg",
+    "Quizzes_Avg",
+    "Participation_Score",
+    "Projects_Score",
+    "math_score",
+    "reading_score",
+    "writing_score",
+    "science_score"
+]
 
-    elif average < 65 or attendance < 75:
-        risk = "Medium Risk"
+missing_columns = [
+    column for column in required_columns
+    if column not in raw_df.columns
+]
 
-    else:
-        risk = "Low Risk"
+if missing_columns:
 
-    students.append([
-        f"Student {i:03d}",
-        mathematics,
-        science,
-        english,
-        attendance,
-        assignments,
-        previous_exam,
-        round(average, 2),
-        risk
-    ])
+    st.error(
+        "❌ The following required columns are missing from the CSV:"
+    )
 
-df = pd.DataFrame(
-    students,
-    columns=[
-        "Student",
+    st.write(missing_columns)
+
+    st.info(
+        "Please make sure you are using the student_data.csv "
+        "dataset with the columns expected by this application."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# DATA PROCESSING
+# ============================================================
+
+df = raw_df.copy()
+
+
+# ------------------------------------------------------------
+# Student ID
+# ------------------------------------------------------------
+
+df["Student"] = df["Student_ID"].astype(str)
+
+
+# ------------------------------------------------------------
+# Student Name
+# ------------------------------------------------------------
+
+df["Student Name"] = (
+    df["First_Name"].astype(str)
+    + " "
+    + df["Last_Name"].astype(str)
+)
+
+
+# ------------------------------------------------------------
+# Mathematics
+# ------------------------------------------------------------
+
+df["Mathematics"] = pd.to_numeric(
+    df["math_score"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Science
+# ------------------------------------------------------------
+
+df["Science"] = pd.to_numeric(
+    df["science_score"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# English
+#
+# English is represented using reading + writing scores.
+# ------------------------------------------------------------
+
+df["English"] = (
+    pd.to_numeric(df["reading_score"], errors="coerce")
+    +
+    pd.to_numeric(df["writing_score"], errors="coerce")
+) / 2
+
+
+# ------------------------------------------------------------
+# Attendance
+# ------------------------------------------------------------
+
+df["Attendance"] = pd.to_numeric(
+    df["Attendance (%)"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Assignments
+# ------------------------------------------------------------
+
+df["Assignments"] = pd.to_numeric(
+    df["Assignments_Avg"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Midterm
+# ------------------------------------------------------------
+
+df["Midterm"] = pd.to_numeric(
+    df["Midterm_Score"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Final Examination
+# ------------------------------------------------------------
+
+df["Final"] = pd.to_numeric(
+    df["Final_Score"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Quiz
+# ------------------------------------------------------------
+
+df["Quizzes"] = pd.to_numeric(
+    df["Quizzes_Avg"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Participation
+# ------------------------------------------------------------
+
+df["Participation"] = pd.to_numeric(
+    df["Participation_Score"],
+    errors="coerce"
+)
+
+
+# ------------------------------------------------------------
+# Projects
+# ------------------------------------------------------------
+
+df["Projects"] = pd.to_numeric(
+    df["Projects_Score"],
+    errors="coerce"
+)
+
+
+# ============================================================
+# REMOVE INVALID RECORDS
+# ============================================================
+
+df = df.dropna(
+    subset=[
         "Mathematics",
         "Science",
         "English",
         "Attendance",
         "Assignments",
-        "Previous Exam",
-        "Average",
-        "Risk"
+        "Midterm",
+        "Final"
     ]
+).reset_index(drop=True)
+
+
+# ============================================================
+# OVERALL PERFORMANCE
+# ============================================================
+
+df["Average"] = (
+    df["Mathematics"]
+    + df["Science"]
+    + df["English"]
+    + df["Assignments"]
+    + df["Midterm"]
+    + df["Final"]
+) / 6
+
+
+df["Average"] = df["Average"].round(2)
+
+
+# ============================================================
+# RISK CLASSIFICATION
+# ============================================================
+#
+# Risk is determined using academic performance and attendance.
+#
+# High Risk:
+#   Average < 50 OR Attendance < 60
+#
+# Medium Risk:
+#   Average < 65 OR Attendance < 75
+#
+# Low Risk:
+#   Otherwise
+#
+# This follows the same basic logic as your original project.
+# ============================================================
+
+def calculate_risk(row):
+
+    average = row["Average"]
+    attendance = row["Attendance"]
+
+    if average < 50 or attendance < 60:
+        return "High Risk"
+
+    elif average < 65 or attendance < 75:
+        return "Medium Risk"
+
+    else:
+        return "Low Risk"
+
+
+df["Risk"] = df.apply(
+    calculate_risk,
+    axis=1
 )
+
 
 # ============================================================
 # MACHINE LEARNING MODEL
@@ -101,35 +303,84 @@ features = [
     "English",
     "Attendance",
     "Assignments",
-    "Previous Exam"
+    "Midterm",
+    "Final",
+    "Quizzes",
+    "Participation",
+    "Projects"
 ]
+
 
 X = df[features]
 y = df["Risk"]
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.25,
-    random_state=42,
-    stratify=y
-)
+
+# ------------------------------------------------------------
+# Train/Test Split
+# ------------------------------------------------------------
+
+try:
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.25,
+        random_state=42,
+        stratify=y
+    )
+
+except ValueError:
+
+    # Fallback if the dataset contains too few samples
+    # in one of the risk categories.
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.25,
+        random_state=42
+    )
+
+
+# ------------------------------------------------------------
+# Random Forest
+# ------------------------------------------------------------
 
 model = RandomForestClassifier(
     n_estimators=100,
     random_state=42
 )
 
-model.fit(X_train, y_train)
 
-prediction = model.predict(X_test)
+model.fit(
+    X_train,
+    y_train
+)
+
+
+# ------------------------------------------------------------
+# Test Prediction
+# ------------------------------------------------------------
+
+prediction = model.predict(
+    X_test
+)
+
 
 accuracy = accuracy_score(
     y_test,
     prediction
 )
 
-df["ML Prediction"] = model.predict(df[features])
+
+# ------------------------------------------------------------
+# Prediction for all students
+# ------------------------------------------------------------
+
+df["ML Prediction"] = model.predict(
+    df[features]
+)
+
 
 # ============================================================
 # SIDEBAR
@@ -156,6 +407,7 @@ st.sidebar.success(
     "AI-powered student performance analysis"
 )
 
+
 # ============================================================
 # DASHBOARD
 # ============================================================
@@ -165,12 +417,40 @@ if page == "🏠 Dashboard":
     st.header("🏠 Dashboard")
 
     st.info(
-        "The system analyzes academic performance, attendance, "
-        "assignments and previous examination results to identify "
+        "The system analyzes real student performance data, "
+        "including subject marks, attendance, assignments, "
+        "examinations and other academic indicators to identify "
         "students who may require additional support."
     )
 
-    # ---------------- METRICS ----------------
+    # --------------------------------------------------------
+    # DATASET INFORMATION
+    # --------------------------------------------------------
+
+    st.subheader("📂 Dataset Information")
+
+    info1, info2, info3 = st.columns(3)
+
+    info1.metric(
+        "📊 Student Records",
+        len(df)
+    )
+
+    info2.metric(
+        "📚 Academic Features",
+        len(features)
+    )
+
+    info3.metric(
+        "📈 Average Performance",
+        f"{df['Average'].mean():.2f}%"
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # METRICS
+    # --------------------------------------------------------
 
     total_students = len(df)
 
@@ -219,7 +499,9 @@ if page == "🏠 Dashboard":
 
     st.markdown("---")
 
-    # ---------------- RISK DISTRIBUTION ----------------
+    # --------------------------------------------------------
+    # RISK DISTRIBUTION
+    # --------------------------------------------------------
 
     st.subheader("🚦 Student Risk Distribution")
 
@@ -242,13 +524,41 @@ if page == "🏠 Dashboard":
 
     st.markdown("---")
 
-    # ---------------- ALL STUDENTS ----------------
+    # --------------------------------------------------------
+    # SUBJECT AVERAGES
+    # --------------------------------------------------------
 
-    st.subheader("👨‍🎓 All Student Performance")
+    st.subheader("📚 Subject-wise Average Performance")
+
+    subject_data = pd.DataFrame({
+        "Subject": [
+            "Mathematics",
+            "Science",
+            "English"
+        ],
+        "Average Marks": [
+            df["Mathematics"].mean(),
+            df["Science"].mean(),
+            df["English"].mean()
+        ]
+    })
+
+    st.bar_chart(
+        subject_data.set_index("Subject")
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # ALL STUDENTS
+    # --------------------------------------------------------
+
+    st.subheader("👨‍🎓 Student Performance")
 
     display_df = df[
         [
             "Student",
+            "Student Name",
             "Mathematics",
             "Science",
             "English",
@@ -269,9 +579,9 @@ if page == "🏠 Dashboard":
     )
 
     st.caption(
-        "All 100 students are displayed above. "
         "Students are sorted from lowest to highest average performance."
     )
+
 
 # ============================================================
 # STUDENT ANALYSIS
@@ -292,6 +602,10 @@ elif page == "👨‍🎓 Student Analysis":
 
     st.markdown("---")
 
+    st.subheader(
+        f"👨‍🎓 {student['Student Name']} ({student['Student']})"
+    )
+
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric(
@@ -301,12 +615,12 @@ elif page == "👨‍🎓 Student Analysis":
 
     col2.metric(
         "📅 Attendance",
-        f"{student['Attendance']}%"
+        f"{student['Attendance']:.1f}%"
     )
 
     col3.metric(
         "📝 Assignments",
-        f"{student['Assignments']}%"
+        f"{student['Assignments']:.1f}%"
     )
 
     col4.metric(
@@ -315,6 +629,10 @@ elif page == "👨‍🎓 Student Analysis":
     )
 
     st.markdown("---")
+
+    # --------------------------------------------------------
+    # SUBJECT PERFORMANCE
+    # --------------------------------------------------------
 
     st.subheader("📚 Subject Performance")
 
@@ -337,7 +655,40 @@ elif page == "👨‍🎓 Student Analysis":
 
     st.markdown("---")
 
-    # Weak subjects
+    # --------------------------------------------------------
+    # ADDITIONAL PERFORMANCE
+    # --------------------------------------------------------
+
+    st.subheader("📈 Additional Academic Performance")
+
+    additional = pd.DataFrame({
+        "Component": [
+            "Midterm",
+            "Final",
+            "Assignments",
+            "Quizzes",
+            "Participation",
+            "Projects"
+        ],
+        "Score": [
+            student["Midterm"],
+            student["Final"],
+            student["Assignments"],
+            student["Quizzes"],
+            student["Participation"],
+            student["Projects"]
+        ]
+    })
+
+    st.bar_chart(
+        additional.set_index("Component")
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # WEAK SUBJECTS
+    # --------------------------------------------------------
 
     weak_subjects = []
 
@@ -363,6 +714,7 @@ elif page == "👨‍🎓 Student Analysis":
             "No major subject weakness detected."
         )
 
+
 # ============================================================
 # PERFORMANCE ANALYSIS
 # ============================================================
@@ -370,6 +722,10 @@ elif page == "👨‍🎓 Student Analysis":
 elif page == "📊 Performance Analysis":
 
     st.header("📊 Performance Analysis")
+
+    # --------------------------------------------------------
+    # SUBJECT-WISE AVERAGE
+    # --------------------------------------------------------
 
     st.subheader("📚 Subject-wise Average Performance")
 
@@ -392,6 +748,47 @@ elif page == "📊 Performance Analysis":
 
     st.markdown("---")
 
+    # --------------------------------------------------------
+    # ACADEMIC COMPONENTS
+    # --------------------------------------------------------
+
+    st.subheader("📝 Academic Component Analysis")
+
+    component_average = pd.DataFrame({
+        "Component": [
+            "Mathematics",
+            "Science",
+            "English",
+            "Assignments",
+            "Midterm",
+            "Final",
+            "Quizzes",
+            "Participation",
+            "Projects"
+        ],
+        "Average Score": [
+            df["Mathematics"].mean(),
+            df["Science"].mean(),
+            df["English"].mean(),
+            df["Assignments"].mean(),
+            df["Midterm"].mean(),
+            df["Final"].mean(),
+            df["Quizzes"].mean(),
+            df["Participation"].mean(),
+            df["Projects"].mean()
+        ]
+    })
+
+    st.bar_chart(
+        component_average.set_index("Component")
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # ATTENDANCE VS PERFORMANCE
+    # --------------------------------------------------------
+
     st.subheader("📈 Attendance vs Performance")
 
     attendance_data = df[
@@ -408,6 +805,10 @@ elif page == "📊 Performance Analysis":
     )
 
     st.markdown("---")
+
+    # --------------------------------------------------------
+    # STUDENT RANKING
+    # --------------------------------------------------------
 
     st.subheader("🏆 Student Ranking")
 
@@ -426,6 +827,7 @@ elif page == "📊 Performance Analysis":
             [
                 "Rank",
                 "Student",
+                "Student Name",
                 "Average",
                 "Attendance",
                 "ML Prediction"
@@ -434,6 +836,7 @@ elif page == "📊 Performance Analysis":
         use_container_width=True,
         hide_index=True
     )
+
 
 # ============================================================
 # ML PREDICTION
@@ -444,11 +847,12 @@ elif page == "🤖 ML Prediction":
     st.header("🤖 Machine Learning Prediction")
 
     st.info(
-        "A Random Forest machine-learning model analyzes student "
-        "performance and predicts their academic risk category."
+        "A Random Forest machine-learning model analyzes "
+        "multiple academic indicators and attendance to "
+        "predict the student's academic risk category."
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     col1.metric(
         "🤖 ML Algorithm",
@@ -460,7 +864,46 @@ elif page == "🤖 ML Prediction":
         f"{accuracy * 100:.2f}%"
     )
 
+    col3.metric(
+        "📊 Training Records",
+        len(X_train)
+    )
+
     st.markdown("---")
+
+    # --------------------------------------------------------
+    # FEATURES USED
+    # --------------------------------------------------------
+
+    st.subheader("📌 Features Used by ML Model")
+
+    feature_table = pd.DataFrame({
+        "Feature": features,
+        "Description": [
+            "Mathematics examination score",
+            "Science examination score",
+            "English performance from reading and writing",
+            "Student attendance percentage",
+            "Average assignment score",
+            "Midterm examination score",
+            "Final examination score",
+            "Average quiz score",
+            "Class participation score",
+            "Project score"
+        ]
+    })
+
+    st.dataframe(
+        feature_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # ML RESULTS
+    # --------------------------------------------------------
 
     st.subheader("🎯 ML Prediction Results")
 
@@ -468,14 +911,32 @@ elif page == "🤖 ML Prediction":
         df[
             [
                 "Student",
+                "Student Name",
                 "Average",
                 "Attendance",
+                "Risk",
                 "ML Prediction"
             ]
         ],
         use_container_width=True,
         hide_index=True
     )
+
+    st.markdown("---")
+
+    st.subheader("📊 Prediction Distribution")
+
+    prediction_data = (
+        df["ML Prediction"]
+        .value_counts()
+        .rename_axis("Risk Level")
+        .reset_index(name="Students")
+    )
+
+    st.bar_chart(
+        prediction_data.set_index("Risk Level")
+    )
+
 
 # ============================================================
 # REMEDIAL STUDENTS
@@ -496,7 +957,9 @@ elif page == "🚨 Remedial Students":
         )
     ].copy()
 
-    # Counts
+    # --------------------------------------------------------
+    # COUNTS
+    # --------------------------------------------------------
 
     high_support = len(
         remedial_students[
@@ -529,12 +992,17 @@ elif page == "🚨 Remedial Students":
 
     st.markdown("---")
 
+    # --------------------------------------------------------
+    # REMEDIAL LIST
+    # --------------------------------------------------------
+
     st.subheader("📋 Remedial Student List")
 
     st.dataframe(
         remedial_students[
             [
                 "Student",
+                "Student Name",
                 "Mathematics",
                 "Science",
                 "English",
@@ -552,7 +1020,9 @@ elif page == "🚨 Remedial Students":
 
     st.markdown("---")
 
-    # Download remedial list
+    # --------------------------------------------------------
+    # DOWNLOAD
+    # --------------------------------------------------------
 
     remedial_csv = remedial_students.to_csv(
         index=False
@@ -565,6 +1035,7 @@ elif page == "🚨 Remedial Students":
         "text/csv"
     )
 
+
 # ============================================================
 # REMEDIAL SUPPORT
 # ============================================================
@@ -572,8 +1043,6 @@ elif page == "🚨 Remedial Students":
 elif page == "💡 Remedial Support":
 
     st.header("💡 Personalized Remedial Support")
-
-    # Only students needing support
 
     remedial_students = df[
         df["ML Prediction"].isin(
@@ -600,7 +1069,13 @@ elif page == "💡 Remedial Support":
 
         st.markdown("---")
 
-        # Student summary
+        st.subheader(
+            f"👨‍🎓 {student['Student Name']} ({student['Student']})"
+        )
+
+        # ----------------------------------------------------
+        # SUMMARY
+        # ----------------------------------------------------
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -611,12 +1086,12 @@ elif page == "💡 Remedial Support":
 
         col2.metric(
             "📅 Attendance",
-            f"{student['Attendance']}%"
+            f"{student['Attendance']:.1f}%"
         )
 
         col3.metric(
             "📝 Assignments",
-            f"{student['Assignments']}%"
+            f"{student['Assignments']:.1f}%"
         )
 
         col4.metric(
@@ -626,7 +1101,9 @@ elif page == "💡 Remedial Support":
 
         st.markdown("---")
 
-        # Weak subjects
+        # ----------------------------------------------------
+        # WEAK SUBJECTS
+        # ----------------------------------------------------
 
         weak_subjects = []
 
@@ -646,18 +1123,24 @@ elif page == "💡 Remedial Support":
             for subject in weak_subjects:
 
                 if subject == "Mathematics":
+
                     st.warning(
-                        "➗ Mathematics: Additional problem-solving practice required."
+                        "➗ Mathematics: Additional problem-solving "
+                        "practice required."
                     )
 
                 elif subject == "Science":
+
                     st.warning(
-                        "🔬 Science: Simplified learning materials and revision recommended."
+                        "🔬 Science: Simplified learning materials "
+                        "and revision recommended."
                     )
 
                 elif subject == "English":
+
                     st.warning(
-                        "📖 English: Reading, vocabulary and communication activities recommended."
+                        "📖 English: Reading, vocabulary and "
+                        "communication activities recommended."
                     )
 
         else:
@@ -666,7 +1149,9 @@ elif page == "💡 Remedial Support":
                 "No individual subject is below the support threshold."
             )
 
-        # Recommendations
+        # ----------------------------------------------------
+        # RECOMMENDATIONS
+        # ----------------------------------------------------
 
         st.markdown("---")
 
@@ -705,7 +1190,8 @@ elif page == "💡 Remedial Support":
         if student["Average"] < 50:
 
             st.error(
-                "👩‍🏫 One-to-one mentoring and intensive remedial teaching recommended."
+                "👩‍🏫 One-to-one mentoring and intensive "
+                "remedial teaching recommended."
             )
 
         st.success(
@@ -716,7 +1202,9 @@ elif page == "💡 Remedial Support":
             "🤝 Encourage peer learning and small-group activities."
         )
 
-        # Action plan
+        # ----------------------------------------------------
+        # ACTION PLAN
+        # ----------------------------------------------------
 
         st.markdown("---")
 
@@ -747,6 +1235,8 @@ elif page == "💡 Remedial Support":
             use_container_width=True,
             hide_index=True
         )
+
+
 # ============================================================
 # INNOVATIVE TEACHING & CAPACITY BUILDING
 # ============================================================
@@ -757,17 +1247,18 @@ elif page == "👩‍🏫 Innovative Teaching":
 
     st.info(
         "This section helps teachers select innovative teaching "
-        "strategies and build skills for supporting students with "
-        "different learning needs."
+        "strategies and develop skills for supporting students "
+        "with different learning needs."
     )
 
     # --------------------------------------------------------
-    # TEACHING METHOD LIBRARY
+    # METHOD LIBRARY
     # --------------------------------------------------------
 
     st.subheader("📚 Innovative Teaching Method Library")
 
     teaching_methods = pd.DataFrame({
+
         "Method": [
             "🎮 Gamification",
             "🤝 Peer Learning",
@@ -811,7 +1302,7 @@ elif page == "👩‍🏫 Innovative Teaching":
     st.markdown("---")
 
     # --------------------------------------------------------
-    # STUDENT PROBLEM
+    # LEARNING CHALLENGE
     # --------------------------------------------------------
 
     st.subheader("🎯 Select Student Learning Challenge")
@@ -923,6 +1414,7 @@ elif page == "👩‍🏫 Innovative Teaching":
     )
 
     capacity_data = pd.DataFrame({
+
         "Training Area": [
             "Digital Learning",
             "Gamification",
@@ -996,6 +1488,7 @@ elif page == "👩‍🏫 Innovative Teaching":
     st.subheader("🗓️ Suggested Capacity Building Plan")
 
     training_plan = pd.DataFrame({
+
         "Week": [
             "Week 1",
             "Week 2",
@@ -1028,8 +1521,10 @@ elif page == "👩‍🏫 Innovative Teaching":
         "🎯 Goal: Build teacher capacity to use innovative, "
         "student-centered methods for improving learning outcomes."
     )
+
+
 # ============================================================
-# DOWNLOAD COMPLETE DATA
+# DOWNLOAD COMPLETE PROCESSED DATA
 # ============================================================
 
 st.sidebar.markdown("---")
@@ -1039,11 +1534,12 @@ csv = df.to_csv(
 ).encode("utf-8")
 
 st.sidebar.download_button(
-    "📥 Download All Student Data",
+    "📥 Download Processed Student Data",
     csv,
-    "student_performance_data.csv",
+    "processed_student_performance_data.csv",
     "text/csv"
 )
+
 
 # ============================================================
 # FOOTER
